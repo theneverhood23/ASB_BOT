@@ -7,6 +7,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pathlib import Path  # Добавлен импорт Path
 import calendar
 import logging
 
@@ -21,6 +22,11 @@ logging.basicConfig(
 
 load_dotenv()  # Загружает переменные из файла .env
 token = os.getenv("TELEGRAM_BOT_TOKEN")  # Получает токен
+
+# Универсальный путь к папке с шаблонами
+# По умолчанию: папка templates в директории скрипта
+BASE_DIR = Path(__file__).resolve().parent
+TEMPLATE_DIR = Path(os.getenv("TEMPLATE_DIR", BASE_DIR / "templates"))
 
 bot = telebot.TeleBot(token)
 bot.current_stage = None
@@ -129,41 +135,50 @@ def ask_next_question(message):
 # Функция для заполнения шаблона документа
 def fill_template(template_path, output_path, data):
     try:
+        # Проверка существования шаблона
+        if not template_path.exists():
+            raise FileNotFoundError(f"Шаблон не найден: {template_path}")
+        logging.info(f"Загрузка шаблона: {template_path}")
+
         doc = Document(template_path)
         normalized_data = {k: str(v) if v is not None else "" for k, v in data.items()}
         logging.info(f"Нормализованные данные для шаблона: {normalized_data}")
 
-        def replace_placeholders_in_runs(paragraph, data):
-            for run in paragraph.runs:
-                for key, value in data.items():
-                    placeholders = [
-                        f"{{{{{key}}}}}",
-                        f"{{{{ {key} }}}}",
-                        f"{{{{{key.upper()}}}}}",
-                        f"{{{{ {key.upper()} }}}}"
-                    ]
-                    for placeholder in placeholders:
-                        if placeholder in run.text:
-                            run.text = run.text.replace(placeholder, value)
+        def replace_placeholders(text, data):
+            for key, value in data.items():
+                placeholders = [
+                    f"{{{{{key}}}}}",
+                    f"{{{{ {key} }}}}",
+                    f"{{{{{key.upper()}}}}}",
+                    f"{{{{ {key.upper()} }}}}"
+                ]
+                for placeholder in placeholders:
+                    if placeholder in text:
+                        text = text.replace(placeholder, value)
+            return text
 
         # Обработка параграфов
         for paragraph in doc.paragraphs:
-            replace_placeholders_in_runs(paragraph, normalized_data)
+            if paragraph.text.strip():
+                paragraph.text = replace_placeholders(paragraph.text, normalized_data)
 
         # Обработка таблиц
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        replace_placeholders_in_runs(paragraph, normalized_data)
+                    if cell.text.strip():
+                        cell.text = replace_placeholders(cell.text, normalized_data)
 
         # Обработка колонтитулов
         for section in doc.sections:
             for header in section.header.paragraphs:
-                replace_placeholders_in_runs(header, normalized_data)
+                if header.text.strip():
+                    header.text = replace_placeholders(header.text, normalized_data)
             for footer in section.footer.paragraphs:
-                replace_placeholders_in_runs(footer, normalized_data)
+                if footer.text.strip():
+                    footer.text = replace_placeholders(footer.text, normalized_data)
 
+        # Сохранение документа
         doc.save(output_path)
         if not os.path.exists(output_path):
             raise FileNotFoundError(f"Файл {output_path} не был создан")
@@ -171,9 +186,6 @@ def fill_template(template_path, output_path, data):
     except Exception as e:
         logging.error(f"Ошибка в fill_template: {str(e)}")
         raise
-    
-# Сохранение нового документа
-    doc.save(output_path)
 
 # ЗАЦИКЛИВАЕМ РАБОТУ БОТА
 # Функция для отправки кнопки "Создать новый договор"
@@ -898,18 +910,17 @@ def handle_post_payment(message):
     logging.info(f"Данные для шаблона: {data}, chat_id: {chat_id}")
 
     # Выбор шаблона
-    template_dir = r"C:\Users\xutpb\OneDrive\Documents\python\abs_consulting_bot"
     if getattr(bot, "selected_contract_type", None) == "Беспроцентный":
-        template_path = os.path.join(template_dir, "template_dkz_interest_free.docx")
+        template_path = TEMPLATE_DIR / "template_dkz_interest_free.docx"
     elif getattr(bot, "selected_contract_type", None) == "Процентный":
-        template_path = os.path.join(template_dir, "template_dkz_with_interest.docx")
+        template_path = TEMPLATE_DIR / "template_dkz_with_interest.docx"
     else:
         bot.send_message(chat_id, "Ошибка: тип договора не выбран.")
         logging.error(f"Тип договора не выбран, chat_id: {chat_id}")
         return
 
-    logging.info(f"Проверка шаблона: {template_path}, существует: {os.path.exists(template_path)}, chat_id: {chat_id}")
-    if not os.path.exists(template_path):
+    logging.info(f"Проверка шаблона: {template_path}, существует: {template_path.exists()}, chat_id: {chat_id}")
+    if not template_path.exists():
         bot.send_message(chat_id, f"Шаблон договора не найден: {template_path}. Пожалуйста, обратитесь к администратору.")
         logging.error(f"Файл шаблона не найден: {template_path}, chat_id: {chat_id}")
         return
