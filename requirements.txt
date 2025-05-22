@@ -1,0 +1,4 @@
+python-dotenv
+pytelegrambotapi
+python-docx
+pdfkit
