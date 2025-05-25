@@ -1,4 +1,4 @@
 python-dotenv
 pytelegrambotapi
-python-docx
-pdfkit
+docxtpl
+jinja2
